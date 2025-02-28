@@ -1,0 +1,312 @@
+From a4be477b238fb650d66cd7a9694ff5dc725a1da7 Mon Sep 17 00:00:00 2001
+From: yangyingchao <yang.yingchao@qq.com>
+Date: Fri, 28 Feb 2025 16:44:01 +0800
+Subject: [PATCH] cpp-pinyin.
+
+---
+ char32.c | 16 ++++++++++++----
+ char32.h |  3 ++-
+ config.c |  4 ++--
+ dmenu.c  |  2 +-
+ main.c   | 12 ++++++------
+ match.c  |  2 +-
+ path.c   |  2 +-
+ xdg.c    | 39 +++++++++++++++++++++++++++++++--------
+ 8 files changed, 56 insertions(+), 24 deletions(-)
+
+diff --git a/char32.c b/char32.c
+index 3106591..c7d976b 100644
+--- a/char32.c
++++ b/char32.c
+@@ -1,5 +1,6 @@
+ #include "char32.h"
+ 
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <assert.h>
+@@ -177,16 +178,23 @@ c32tombs(char *dst, const char32_t *src, size_t len)
+ }
+ 
+ char32_t *
+-ambstoc32(const char *src)
++ambstoc32(const char *src, converter func)
+ {
+     if (src == NULL)
+         return NULL;
+ 
+-    const size_t src_len = strlen(src);
++    char* tmp = (char*)src;
++    if (func) {
++        const char* translated = func(src);
++        if (translated && strlen(src) != strlen(translated)) {
++            tmp = malloc(strlen(src) + 1 + strlen(translated) + 1);
++            sprintf(tmp, "%s %s", src, translated);
++            src = tmp;
++        }
++    }
+ 
++    const size_t src_len = strlen(src);
+     char32_t *ret = malloc((src_len + 1) * sizeof(ret[0]));
+-    if (ret == NULL)
+-        return NULL;
+ 
+     mbstate_t ps = {0};
+     char32_t *out = ret;
+diff --git a/char32.h b/char32.h
+index f9cb26c..5c73d28 100644
+--- a/char32.h
++++ b/char32.h
+@@ -5,6 +5,7 @@
+ #include <stddef.h>
+ #include <stdarg.h>
+ 
++typedef const char* (* converter)(const char*);
+ size_t c32len(const char32_t *s);
+ int c32cmp(const char32_t *s1, const char32_t *s2);
+ int c32casecmp(const char32_t *s1, const char32_t *s2);
+@@ -17,7 +18,7 @@ size_t mbsntoc32(char32_t *dst, const char *src, size_t nms, size_t len);
+ size_t mbstoc32(char32_t *dst, const char *src, size_t len);
+ size_t c32ntombs(char *dst, const char32_t *src, size_t nwc, size_t len);
+ size_t c32tombs(char *dst, const char32_t *src, size_t len);
+-char32_t *ambstoc32(const char *src);
++char32_t *ambstoc32(const char *src, converter func);
+ char *ac32tombs(const char32_t *src);
+ 
+ char32_t toc32lower(char32_t c);
+diff --git a/config.c b/config.c
+index 3f4de25..5ceb81a 100644
+--- a/config.c
++++ b/config.c
+@@ -558,7 +558,7 @@ value_to_str(struct context *ctx, char **res)
+ static bool
+ value_to_wchars(struct context *ctx, char32_t **res)
+ {
+-    char32_t *s = ambstoc32(ctx->value);
++    char32_t *s = ambstoc32(ctx->value, NULL);
+     if (s == NULL) {
+         LOG_CONTEXTUAL_ERR("not a valid string value");
+         return false;
+@@ -873,7 +873,7 @@ parse_section_main(struct context *ctx)
+     }
+ 
+     else if (strcmp(key, "password-character") == 0) {
+-        char32_t *password_chars = ambstoc32(value);
++        char32_t *password_chars = ambstoc32(value, NULL);
+         if (password_chars == NULL) {
+             LOG_CONTEXTUAL_ERR("invalid password character");
+             return false;
+diff --git a/dmenu.c b/dmenu.c
+index 7b361a3..c7fab96 100644
+--- a/dmenu.c
++++ b/dmenu.c
+@@ -156,7 +156,7 @@ dmenu_load_entries(struct application_list *applications, char delim,
+ 
+             LOG_DBG("%s (icon=%s)", buffer, icon_name);
+ 
+-            char32_t *wline = ambstoc32(buffer);
++            char32_t *wline = ambstoc32(buffer, NULL);
+ 
+             /* Consume entry from input buffer */
+             const size_t consume = delim_at + 1 - buffer;
+diff --git a/main.c b/main.c
+index 1244490..c9d3798 100644
+--- a/main.c
++++ b/main.c
+@@ -151,7 +151,7 @@ read_cache(const char *path, struct application_list *apps, bool dmenu)
+ 
+         struct cache_entry entry = {
+             .id = dmenu ? NULL : strdup(id),
+-            .title = dmenu ? ambstoc32(id) : NULL,
++            .title = dmenu ? ambstoc32(id, NULL) : NULL,
+             .count = count,
+         };
+         tll_push_back(cache_entries, entry);
+@@ -1007,7 +1007,7 @@ main(int argc, char *const *argv)
+         case OPT_PASSWORD: {
+             char32_t password_char = U'\0';
+             if (optarg != NULL) {
+-                char32_t *wide_optarg = ambstoc32(optarg);
++                char32_t *wide_optarg = ambstoc32(optarg, NULL);
+                 if (wide_optarg == NULL){
+                     fprintf(stderr, "%s: invalid password character\n", optarg);
+                     return EXIT_FAILURE;
+@@ -1128,7 +1128,7 @@ main(int argc, char *const *argv)
+ 
+         case 'p':
+             free(cmdline_overrides.conf.prompt);
+-            cmdline_overrides.conf.prompt = ambstoc32(optarg);
++            cmdline_overrides.conf.prompt = ambstoc32(optarg, NULL);
+ 
+             if (cmdline_overrides.conf.prompt == NULL) {
+                 fprintf(stderr, "%s: invalid prompt\n", optarg);
+@@ -1139,7 +1139,7 @@ main(int argc, char *const *argv)
+ 
+         case OPT_PROMPT_ONLY:
+             free(cmdline_overrides.conf.prompt);
+-            cmdline_overrides.conf.prompt = ambstoc32(optarg);
++            cmdline_overrides.conf.prompt = ambstoc32(optarg, NULL);
+ 
+             if (cmdline_overrides.conf.prompt == NULL) {
+                 fprintf(stderr, "%s: invalid prompt\n", optarg);
+@@ -1152,7 +1152,7 @@ main(int argc, char *const *argv)
+ 
+         case OPT_PLACEHOLDER:
+             free(cmdline_overrides.conf.placeholder);
+-            cmdline_overrides.conf.placeholder = ambstoc32(optarg);
++            cmdline_overrides.conf.placeholder = ambstoc32(optarg, NULL);
+ 
+             if (cmdline_overrides.conf.placeholder == NULL) {
+                 fprintf(stderr, "%s: invalid placeholder\n", optarg);
+@@ -1163,7 +1163,7 @@ main(int argc, char *const *argv)
+ 
+         case OPT_SEARCH_TEXT:
+             free(cmdline_overrides.conf.search_text);
+-            cmdline_overrides.conf.search_text = ambstoc32(optarg);
++            cmdline_overrides.conf.search_text = ambstoc32(optarg, NULL);
+ 
+             if (cmdline_overrides.conf.search_text == NULL) {
+                 fprintf(stderr, "%s: invalid search text\n", optarg);
+diff --git a/match.c b/match.c
+index 0253b26..ca7cbb6 100644
+--- a/match.c
++++ b/match.c
+@@ -681,7 +681,7 @@ matches_selected_select(struct matches *matches, const char *_string)
+     if (_string == NULL)
+         return false;
+ 
+-    char32_t *string = ambstoc32(_string);
++    char32_t *string = ambstoc32(_string, NULL);
+     if (string == NULL)
+         return false;
+ 
+diff --git a/path.c b/path.c
+index 2390630..991bcd7 100644
+--- a/path.c
++++ b/path.c
+@@ -54,7 +54,7 @@ path_find_programs(struct application_list *applications)
+                 continue;
+             }
+             if (S_ISREG(st.st_mode) && st.st_mode & S_IXUSR) {
+-                char32_t *wtitle = ambstoc32(e->d_name);
++                char32_t *wtitle = ambstoc32(e->d_name, NULL);
+                 if (wtitle == NULL)
+                     continue;
+                 bool already_exist = false;
+diff --git a/xdg.c b/xdg.c
+index 905177b..c2f7e98 100644
+--- a/xdg.c
++++ b/xdg.c
+@@ -16,6 +16,12 @@
+ #include <fcntl.h>
+ #include <pwd.h>
+ 
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++
+ #define LOG_MODULE "xdg"
+ #define LOG_ENABLE_DBG 0
+ #include "log.h"
+@@ -57,6 +63,10 @@ struct action {
+     bool no_startup_notify;
+ };
+ 
++
++void *handle = NULL;
++converter func = NULL;
++
+ static bool
+ filter_desktop_entry(const struct action *act, const char_list_t *desktops)
+ {
+@@ -250,7 +260,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+             if (strcmp(key, "Name") == 0) {
+                 if (locale_score > action->name_locale_score) {
+                     free(action->name);
+-                    action->name = ambstoc32(value);
++                    action->name = ambstoc32(value, func);
+                     action->name_locale_score = locale_score;
+                 }
+             }
+@@ -259,7 +269,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+                 free(action->exec);
+                 free(action->wexec);
+                 action->exec = strdup(value);
+-                action->wexec = ambstoc32(value);
++                action->wexec = ambstoc32(value, NULL);
+             }
+ 
+             else if (strcmp(key, "Path") == 0) {
+@@ -270,7 +280,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+             else if (strcmp(key, "GenericName") == 0) {
+                 if (locale_score > action->generic_name_locale_score) {
+                     free(action->generic_name);
+-                    action->generic_name = ambstoc32(value);
++                    action->generic_name = ambstoc32(value, NULL);
+                     action->generic_name_locale_score = locale_score;
+                 }
+             }
+@@ -288,7 +298,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+             else if (strcmp(key, "Comment") == 0) {
+                 if (locale_score > action->comment_locale_score) {
+                     free(action->comment);
+-                    action->comment = ambstoc32(value);
++                    action->comment = ambstoc32(value, func);
+                     action->comment_locale_score = locale_score;
+                 }
+             }
+@@ -299,7 +309,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+                          kw != NULL;
+                          kw = strtok_r(NULL, ";", &ctx))
+                     {
+-                        char32_t *wide_kw = ambstoc32(kw);
++                        char32_t *wide_kw = ambstoc32(kw, NULL);
+                         if (wide_kw != NULL)
+                             tll_push_back(action->keywords, wide_kw);
+                     }
+@@ -314,7 +324,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+                          category != NULL;
+                          category = strtok_r(NULL, ";", &ctx))
+                     {
+-                        char32_t *wide_category = ambstoc32(category);
++                        char32_t *wide_category = ambstoc32(category, func);
+                         if (wide_category != NULL)
+                             tll_push_back(action->categories, wide_category);
+                     }
+@@ -394,7 +404,7 @@ parse_desktop_file(int fd, char *id, const char32_t *file_basename_lowercase,
+         }
+ 
+         if (a->name == NULL)
+-            a->name = ambstoc32("<no title>");
++            a->name = ambstoc32("<no title>", NULL);
+ 
+         if (a->use_terminal && terminal != NULL && a->exec != NULL) {
+             char *exec_with_terminal = malloc(
+@@ -668,8 +678,21 @@ xdg_find_programs(const char *terminal, bool include_actions,
+                   bool filter_desktop, char_list_t *desktops,
+                   struct application_list *applications)
+ {
+-    application_llist_t apps = tll_init();
++     handle = dlopen("/home/yyc/.local/lib/libfuzzel-plugin-pinyin.so", RTLD_LAZY);
++     if (!handle) {
++         fprintf(stderr, "failed to load pinyin plugin");
++     }
++    dlerror();
++
++    func = dlsym(handle, "fuzzel_plugin_translate");
++
++    char* error = dlerror();
++    if (error != NULL) {
++        fprintf(stderr, "%s\n", error);
++        func = NULL;
++    }
+ 
++    application_llist_t apps = tll_init();
+     xdg_data_dirs_t dirs = xdg_data_dirs();
+     tll_foreach(dirs, it) {
+         char path[strlen(it->item.path) + 1 + strlen("applications") + 1];
+-- 
+2.45.3
+
